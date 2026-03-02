@@ -1,0 +1,119 @@
+<mujocoinclude>
+  <default>
+    <joint damping="0.2" armature="0.01" />
+    <geom friction="1.2 0.005 0.0001" solref="0.02 1" solimp="0.9 0.95 0.001" />
+  </default>
+
+  <asset>
+    <material name="mat_chassis" rgba="0.2 0.2 0.2 1" />
+    <material name="mat_leg" rgba="0.2 0.5 0.9 1" />
+    <material name="mat_wheel" rgba="0.05 0.05 0.05 1" />
+    <material name="mat_servo" rgba="0.8 0.5 0.1 1" />
+  </asset>
+
+  <worldbody>
+    <!-- 坐标系：x 向前，y 向左，z 向上 -->
+    <body name="chassis" pos="0 0 0.31">
+      <!-- 分解式 6 自由度关节 -->
+      <joint name="base_x" type="slide" axis="1 0 0" />
+      <joint name="base_y" type="slide" axis="0 1 0" />
+      <joint name="base_z" type="slide" axis="0 0 1" />
+      <joint name="base_roll" type="hinge" axis="1 0 0" />
+      <joint name="base_1" type="hinge" axis="0 1 0" />
+      <joint name="base_2" type="hinge" axis="0 0 1" />
+
+      <!-- 薄矩形主体：参与碰撞（全身可与地面接触） -->
+      <geom
+        name="chassis_geom"
+        type="box"
+        size="0.25 0.15 0.01"
+        mass="6.87"
+        material="mat_chassis" />
+
+      <!-- 参考点：控制器位置（重心由 MuJoCo 根据质量自动计算） -->
+      <site name="ctrl_site" pos="0.15 0 0" size="0.01" rgba="0 1 0 1" />
+
+      <!-- 前轮腿模块：转向 + 轮子旋转（前后排布，类似自行车） -->
+      <body name="left_module" pos="0.13 0 -0.02" >
+        <!-- 转向关节：绕 z 轴 360° 水平旋转 -->
+<joint name="left_steer" type="hinge" axis="0 0 1" damping="0.2" />        
+
+        <!-- 圆柱舵机外形（参与碰撞） -->
+        <geom
+          name="left_servo_geom"
+          type="cylinder"
+          size="0.1 0.01"
+          mass="0.304"
+          material="mat_servo" />
+
+        <!-- 腿部连杆（矩形块，中心相对舵机圆心偏移） -->
+        <geom
+          name="left_leg_geom"
+          type="box"
+          pos="0 0.02 -0.10"
+          size="0.04 0.01 0.12"
+          mass="5"
+          material="mat_leg" />
+
+        <!-- 轮子位于腿部末端（轮心保持在舵机圆心正下方） -->
+        <body name="left_wheel" pos="0 0 -0.24">
+          <!-- 轮子转动关节：绕局部 y 轴旋转（前进/后退） -->
+          <joint name="left_wheel_spin" type="hinge" axis="0 1 0" damping="0.05" />
+          <geom
+            name="left_wheel_geom"
+            type="cylinder"
+            size="0.06 0.01"
+            quat="0.7071068 0.7071068 0 0"
+            mass="0.828"
+            material="mat_wheel" />
+        </body>
+      </body>
+
+      <!-- 后轮腿模块：转向 + 轮子旋转（前后排布，类似自行车） -->
+      <body name="right_module" pos="-0.13 0 -0.02" >
+        <!-- 转向关节：绕 z 轴 360° 水平旋转 -->
+        <joint name="right_steer" type="hinge" axis="0 0 1" damping="0.2" />
+
+        <!-- 圆柱舵机外形（参与碰撞） -->
+        <geom
+          name="right_servo_geom"
+          type="cylinder"
+          size="0.1 0.01"
+          mass="0.304"
+          material="mat_servo" />
+
+        <!-- 腿部连杆（矩形块，中心相对舵机圆心偏移） -->
+        <geom
+          name="right_leg_geom"
+          type="box"
+          pos="0 0.02 -0.10"
+          size="0.04 0.01 0.12"
+          mass="5"
+          material="mat_leg" />
+
+        <!-- 轮子位于腿部末端（轮心保持在舵机圆心正下方） -->
+        <body name="right_wheel" pos="0 0 -0.24">
+          <!-- 轮子转动关节：绕局部 y 轴旋转（前进/后退） -->
+          <joint name="right_wheel_spin" type="hinge" axis="0 1 0" damping="0.05" />
+          <geom
+            name="right_wheel_geom"
+            type="cylinder"
+            size="0.06 0.01"
+            quat="0.7071068 0.7071068 0 0"
+            mass="0.828"
+            material="mat_wheel" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- 转向控制：位置控制，输入为目标角度（弧度） -->
+    <position name="left_steer_pos" joint="left_steer" kp="10" ctrlrange="-3.1416 3.1416" />
+    <position name="right_steer_pos" joint="right_steer" kp="10" ctrlrange="-3.1416 3.1416" />
+
+    <!-- 轮子控制：力矩控制，LQR 输出可直接作为控制量 -->
+    <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-200 200" />
+    <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-200 200" />
+  </actuator>
+</mujocoinclude>

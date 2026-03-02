@@ -1,0 +1,15 @@
+<mujoco model="wheelleg_scene">
+  <compiler angle="radian" coordinate="local" inertiafromgeom="true" />
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="RK4" cone="elliptic" />
+
+  <include file="robot.xml" />
+
+  <worldbody>
+    <!-- 地面 -->
+    <geom name="ground" type="plane" size="5 5 0.1" rgba="0.92 0.92 0.92 1" friction="1.5 0.005 0.0001" />
+    <!-- 光源 -->
+    <light name="sun" pos="0 0 2" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" />
+    <!-- 相机 -->
+    <camera name="track" mode="trackcom" pos="0 -1.2 0.6" xyaxes="1 0 0 0 0 1" />
+  </worldbody>
+</mujoco>

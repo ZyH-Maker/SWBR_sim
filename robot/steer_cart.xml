@@ -1,0 +1,78 @@
+<mujoco model="steer_cart">
+  <!-- 舵轮小车：锁死倾倒方向（roll/pitch），只保留 x/y/yaw 平面运动 -->
+  <compiler angle="radian" coordinate="local" inertiafromgeom="true" />
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="RK4" cone="elliptic" />
+
+  <default>
+    <joint damping="0.2" armature="0.01" />
+    <geom friction="1.0 0.005 0.0001" solref="0.02 1" solimp="0.9 0.95 0.001" />
+  </default>
+
+  <asset>
+    <material name="mat_chassis" rgba="0.2 0.2 0.2 1" />
+    <material name="mat_leg" rgba="0.2 0.5 0.9 1" />
+    <material name="mat_wheel" rgba="0.05 0.05 0.05 1" />
+    <material name="mat_servo" rgba="0.8 0.5 0.1 1" />
+  </asset>
+
+  <worldbody>
+    <!-- 地面与相机 -->
+    <geom name="ground" type="plane" size="-1 -1 0.1" rgba="0.92 0.92 0.92 1" friction="1.2 0.005 0.0001" />
+    <light name="sun" pos="0 0 2" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" />
+    <camera name="track" mode="trackcom" pos="0 -1.2 0.6" xyaxes="1 0 0 0 0 1" />
+
+    <!-- 坐标系：x 向前，y 向左，z 向上 -->
+    <body name="chassis" pos="0 0 0.32">
+      <!-- 平面底座：只允许 x、y 平移与 yaw -->
+      <joint name="base_z" type="slide" axis="0 0 1" damping="1" />
+      <joint name="base_x" type="slide" axis="1 0 0" damping="2" />
+      <joint name="base_y" type="slide" axis="0 1 0" damping="2" />
+      <joint name="base_yaw" type="hinge" axis="0 0 1" damping="1" />
+      <!-- <joint name="base_roll" type="hinge" axis="1 0 0" damping="1" /> -->
+      <joint name="base_pitch" type="hinge" axis="0 1 0" damping="1" />
+      <!-- 车身主体 -->
+      <geom
+        name="chassis_geom"
+        type="box"
+        size="0.25 0.15 0.01"
+        mass="6.87"
+        material="mat_chassis" />
+
+      <!-- 参考点：控制器位置 -->
+      <site name="ctrl_site" pos="0.15 0 0" size="0.01" rgba="0 1 0 1" />
+
+      <!-- 前轮舵轮模块 -->
+      <body name="left_module" pos="0.13 0 -0.02" euler="0 0 1.5708">
+        <!-- 舵角关节 -->
+        <joint name="left_steer" type="hinge" axis="0 0 1" damping="0.2" />
+        <geom name="left_servo_geom" type="cylinder" size="0.1 0.01" mass="0.304" material="mat_servo" />
+        <geom name="left_leg_geom" type="box" pos="0 0.02 -0.10" size="0.04 0.01 0.12" mass="5" material="mat_leg" />
+        <body name="left_wheel" pos="0 0 -0.24">
+          <joint name="left_wheel_spin" type="hinge" axis="0 1 0" damping="0.05" />
+          <geom name="left_wheel_geom" type="cylinder" size="0.06 0.01" quat="0.7071068 0.7071068 0 0" mass="0.828" material="mat_wheel" />
+        </body>
+      </body>
+
+      <!-- 后轮舵轮模块 -->
+      <body name="right_module" pos="-0.13 0 -0.02" euler="0 0 1.5708">
+        <!-- 舵角关节 -->
+        <joint name="right_steer" type="hinge" axis="0 0 1" damping="0.2" />
+        <geom name="right_servo_geom" type="cylinder" size="0.1 0.01" mass="0.304" material="mat_servo" />
+        <geom name="right_leg_geom" type="box" pos="0 0.02 -0.10" size="0.04 0.01 0.12" mass="5" material="mat_leg" />
+        <body name="right_wheel" pos="0 0 -0.24">
+          <joint name="right_wheel_spin" type="hinge" axis="0 1 0" damping="0.05" />
+          <geom name="right_wheel_geom" type="cylinder" size="0.06 0.01" quat="0.7071068 0.7071068 0 0" mass="0.828" material="mat_wheel" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- 舵角力矩控制（PID 在脚本中实现） -->
+    <motor name="left_steer_tau" joint="left_steer" gear="1" ctrlrange="-50 50" />
+    <motor name="right_steer_tau" joint="right_steer" gear="1" ctrlrange="-50 50" />
+    <!-- 轮子力矩控制（PID 在脚本中实现） -->
+    <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-200 200" />
+    <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-200 200" />
+  </actuator>
+</mujoco>
