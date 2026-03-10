@@ -8,11 +8,11 @@
   -->
 
   <compiler angle="radian" coordinate="local" inertiafromgeom="true" />
-  <option timestep="0.002" gravity="0 0 -9.81" integrator="RK4" cone="elliptic" />
+  <option timestep="0.001" gravity="0 0 -9.81" integrator="RK4" cone="elliptic" />
 
   <default>
-    <joint damping="0.1" armature="0.01" />
-    <geom friction="0.5 0.005 0.0001" solref="0.02 1" solimp="0.9 0.95 0.001" />
+    <joint damping="0.001" armature="0.0" />
+    <geom friction="0.9 0.01 0.0001" solref="0.02 1" solimp="0.9 0.95 0.002" />
   </default>
 
   <asset>
@@ -34,12 +34,12 @@
     -->
     <body name="roll_base" pos="0 0 0">
       <!-- 二维约束：允许 y 平移 + z 自由落地 + roll -->
-      <joint name="base_x" type="slide" axis="1 0 0" />
-      <joint name="base_y" type="slide" axis="0 1 0"  />
-      <joint name="base_z" type="slide" axis="0 0 1"  />
-      <joint name="base_roll" type="hinge" axis="1 0 0"  />
-      <joint name="base_1" type="hinge" axis="0 1 0"  />
-      <joint name="base_2" type="hinge" axis="0 0 1" />
+      <joint name="base_x" type="slide" axis="1 0 0" damping="0" armature="0" />
+      <joint name="base_y" type="slide" axis="0 1 0" damping="0" armature="0" />
+      <joint name="base_z" type="slide" axis="0 0 1" damping="0" armature="0" />
+      <joint name="base_roll" type="hinge" axis="1 0 0" damping="0" armature="0" />
+      <joint name="base_1" type="hinge" axis="0 1 0" damping="0" armature="0" />
+      <joint name="base_2" type="hinge" axis="0 0 1" damping="0" armature="0" />
       <!-- <freejoint name="chassis_free" /> -->
 
       <!-- 机身主体（相对 roll_base 上移到原来的高度） -->
@@ -55,7 +55,7 @@
 
         <!-- 前轮腿模块（整体绕 z 轴旋转 +90°，等效舵角锁定） -->
         <body name="left_module" pos="0.13 0 -0.02" euler="0 0 1.5708">
-          <joint name="left_steer" type="hinge" axis="0 0 1"/>
+          <joint name="left_steer" type="hinge" axis="0 0 1" damping="0.3" frictionloss="0.1"/>
           <geom
             name="left_servo_geom"
             type="cylinder"
@@ -72,7 +72,7 @@
             material="mat_leg" />
 
           <body name="left_wheel" pos="0 0 -0.24">
-            <joint name="left_wheel_spin" type="hinge" axis="0 1 0" />
+            <joint name="left_wheel_spin" type="hinge" axis="0 1 0" damping="0.1" armature="0.00"/>
             <geom
               name="left_wheel_geom"
               type="cylinder"
@@ -85,7 +85,7 @@
 
         <!-- 后轮腿模块（整体绕 z 轴旋转 +90°，等效舵角锁定） -->
         <body name="right_module" pos="-0.13 0 -0.02" euler="0 0 1.5708">
-          <joint name="right_steer" type="hinge" axis="0 0 1"  />
+          <joint name="right_steer" type="hinge" axis="0 0 1" damping="0.3" frictionloss="0.1" />
           <geom
             name="right_servo_geom"
             type="cylinder"
@@ -102,7 +102,7 @@
             material="mat_leg" />
 
           <body name="right_wheel" pos="0 0 -0.24">
-            <joint name="right_wheel_spin" type="hinge" axis="0 1 0" />
+            <joint name="right_wheel_spin" type="hinge" axis="0 1 0" damping="0.1" armature="0.00"/>
             <geom
               name="right_wheel_geom"
               type="cylinder"
@@ -114,14 +114,15 @@
         </body>
       </body>
     </body>
+
   </worldbody>
 
   <actuator>
     <!-- 轮子力矩控制：LQR 输出可直接作为控制量 -->
-    <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-20 20" />
-    <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-20 20" />
+    <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-8 8" />
+    <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-8 8" />
     <!-- 舵角位置控制（swerve 用） -->
-    <position name="left_steer_pos" joint="left_steer" kp="1" ctrlrange="-3.1416 3.1416" />
-    <position name="right_steer_pos" joint="right_steer" kp="1" ctrlrange="-3.1416 3.1416" />
+    <position name="left_steer_pos" joint="left_steer" kp="30" ctrlrange="-3.1416 3.1416" />
+    <position name="right_steer_pos" joint="right_steer" kp="30" ctrlrange="-3.1416 3.1416" />
   </actuator>
 </mujoco>
