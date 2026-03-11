@@ -6,8 +6,11 @@ import control  # LQR 工具
 import matplotlib  # 绘图配置
 import matplotlib.pyplot as plt  # 绘图
 from matplotlib import font_manager as fm  # 字体管理
-import scipy.linalg as la  # 线性代数
+import scipy.linalg  # 线性代数
+from scipy.interpolate import CubicSpline
 
+# 全局变量：用于存储拟合好的 LPV-LQR 插值器
+K_interpolator = None
 
 def setup_chinese_font():  # 设置中文字体
     candidates = [  # 候选字体
@@ -56,9 +59,9 @@ simend = 15.0  # 仿真总时间
 simspeed = 1.0  # 仿真速度
 settle_time = 0  # 初始稳定时间
 print_camera_config = 0  # 是否打印相机参数
-phi_init = 0.6# 初始小侧倾
+phi_init = 0.75  # 初始小侧倾
 move_start = 5.0  # 开始向 y 方向运动的时间
-vy_cmd = 2  # 目标 y 方向速度
+vy_cmd = 2.5  # 目标 y 方向速度
 vy_ramp_time = 0  # 速度爬坡时间
 move_end = 10.0  # 结束向 y 方向运动的时间 
 
@@ -238,6 +241,166 @@ def linearize_discrete_central(x_eq, u_eq, qpos_ref, qvel_ref, eps=None):
     return Ad, Bd
 
 
+def init_LPV_controller():  # 初始化控制器
+    global K_interpolator, x0, x0_joint, qpos0, qvel0, Q, R  # 使用全局变量
+    
+    while data.time < settle_time:  # 初始稳定
+        data.ctrl[aid_left] = 0.0  # 左轮无力矩
+        data.ctrl[aid_right] = 0.0  # 右轮无力矩
+        mj.mj_step(model, data)  # 仿真步进
+        
+    qpos0 = data.qpos.copy()  # 保存 qpos
+    qvel0 = data.qvel.copy()  # 保存 qvel
+    
+    x0 = get_state_from_data(data)  # 获取基准状态
+    x0[2] = 0.0  # 保证初始设定 roll 角为 0
+    
+    Q = np.diag([120000.0, 3000000.0, 120000.0, 220000.0])  # 进一步增大权重
+    R = np.diag([0.2])  # 减小R允许更大控制力
+    u0 = np.array([0.0], dtype=float)  # 平衡输入
+    
+    print("开始进行 LPV 多点线性化与插值拟合...")
+    
+    # 1. 定义 roll 角的采样网格 (例如从 -60度 到 +60度，采样 31 个点)
+    # 取决于你的需求，采样点越密拟合越好
+    roll_grid = np.linspace(-np.radians(60), np.radians(60), 31)
+    K_list = []
+    
+    for roll in roll_grid:
+        # 构造当前角度下的瞬间状态
+        x_eq = x0.copy()
+        x_eq[2] = roll  # 修改 roll 角
+        x_eq[3] = 0.0   # roll 角速度设为 0
+        
+        # 【极其重要的注意点】：
+        # 你的 linearize_discrete_central 接收 qpos0 和 qvel0。
+        # 如果你的内部函数 g_discrete 是强依赖于 x_eq 来覆盖并更新仿真状态的，那么下面这行没问题。
+        # 但如果 g_discrete 内部是从 qpos0 读取 roll 角的，你必须在这里同步修改 qpos0 里的 roll 关节值！
+        Ad, Bd = linearize_discrete_central(x_eq, u0, qpos0, qvel0)  
+        
+        try:
+            # 求解 DARE 并计算 K
+            P = scipy.linalg.solve_discrete_are(Ad, Bd, Q, R) 
+            K_i = np.linalg.inv(R + Bd.T @ P @ Bd) @ (Bd.T @ P @ Ad)
+            K_list.append(K_i[0])  # 取出一维数组 [k1, k2, k3, k4] 存入列表
+        except Exception as e:
+            print(f"在 roll = {np.degrees(roll):.2f}° 处求解失败: {e}")
+            # 容错机制：如果由于物理极限在极端角度求解失败，用上一个合法的 K 矩阵填补
+            if len(K_list) > 0:
+                K_list.append(K_list[-1])
+            else:
+                K_list.append(np.zeros(4))
+                
+    # 2. 生成三次样条插值器
+    K_array = np.array(K_list)
+    K_interpolator = CubicSpline(roll_grid, K_array)
+    
+    print("x0 =", x0)  # 输出平衡点
+    print("LPV 控制器初始化完成，K 矩阵随 roll 角变化的插值器已生成！")
+    print("K(roll = 0°) =", K_array[15])  # 输出 roll = 0° 时的 K 矩阵
+    print(K_interpolator)
+    
+    # 3. 绘制K系数关于倾角的图像
+    plot_K_vs_roll(roll_grid, K_array, K_interpolator)
+
+
+def plot_K_vs_roll(roll_grid, K_array, K_interpolator):
+    """绘制K的四个系数关于倾角的图像"""
+    # 生成更密集的插值点用于绘制平滑曲线
+    roll_fine = np.linspace(roll_grid[0], roll_grid[-1], 200)
+    K_fine = K_interpolator(roll_fine)
+    
+    # 转换为角度方便阅读
+    roll_grid_deg = np.degrees(roll_grid)
+    roll_fine_deg = np.degrees(roll_fine)
+    
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    
+    labels = ['$K_y$', '$K_{\dot{y}}$', '$K_{\\phi}$', '$K_{\dot{\\phi}}$']
+    colors = ['b', 'g', 'r', 'm']
+    
+    for i, (ax, label, color) in enumerate(zip(axes.flatten(), labels, colors)):
+        # 绘制原始采样点
+        ax.plot(roll_grid_deg, K_array[:, i], 'o', markersize=4, color=color, label='采样点')
+        # 绘制三次样条插值曲线
+        ax.plot(roll_fine_deg, K_fine[:, i], '-', color=color, label='三次样条插值')
+        ax.set_xlabel('roll 角 (度)')
+        ax.set_ylabel(label)
+        ax.set_title(f'{label} vs roll 角')
+        ax.grid(True)
+        ax.legend()
+    
+    plt.suptitle('LQR 增益系数 K 随 roll 角变化曲线', fontsize=14)
+    plt.tight_layout()
+    
+    out_png = os.path.join(os.path.dirname(__file__), "lqr_K_vs_roll.png")
+    plt.savefig(out_png, dpi=200)
+    plt.close(fig)
+    print(f"K系数图像已保存到: {out_png}")
+
+def LPV_controller(model_in, data_in):  # 控制回调
+    global K_interpolator, x0  # 确保能访问到插值器和初始状态
+    
+    x = get_state_from_data(data_in)  # 读取状态
+    
+    # --- 生成参考轨迹 ---
+    if data_in.time < move_start:  # 先平衡
+        y_ref = x0[0]  # y 参考（保持初始）
+        ydot_ref = 0.0  # y 速度参考
+    elif data_in.time <= move_end:  # 再向 y 方向匀速运动
+        t_run = data_in.time - move_start  # 运动阶段时间
+        y_ref = x0[0] + vy_cmd * t_run  # 位置参考
+        ydot_ref = vy_cmd  # 速度参考
+    else:
+        y_ref = x0[0] + vy_cmd * (move_end - move_start)  # y 参考
+        ydot_ref = 0.0  # y 速度参考
+        
+    roll_ref = 0.0  # roll 参考（直立）
+    roll_dot_ref = 0.0  # roll 角速度参考
+    x_ref = np.array([y_ref, ydot_ref, roll_ref, roll_dot_ref], dtype=float)  # 参考状态
+    e = x - x_ref  # 跟踪误差
+    
+    # --- 核心修改：LPV 实时查表计算 K ---
+    current_roll = x[2]  # 获取当前的真实 roll 角
+    
+    # 【安全限幅】：极其重要！
+    # 防止系统受干扰 roll 角超过 40 度时，三次样条发生不可控的向外推断 (Extrapolation)
+    roll_clip = np.clip(current_roll, -np.radians(58), np.radians(58))
+    
+    # 瞬间查询插值器，得到当前姿态最完美的反馈增益
+    K_current = K_interpolator(roll_clip)
+    print("K_current =", K_current)
+    # print("e =", e)
+    
+    # LQR 控制
+    u = -K_current @ e  
+    
+    # 力矩限幅
+    u = np.clip(u, -16.0, 16.0) 
+    # print("u =", u)
+    
+    data_in.ctrl[aid_left] = 0.5 * u  # 左轮力矩
+    data_in.ctrl[aid_right] = 0.5 * u  # 右轮力矩
+
+    t_log.append(data_in.time)  # 记录时间
+    x_log.append(x[0])  # 记录状态
+    v_log.append(x[1])  # 记录速度（车身质心）
+    v_wheel_log.append(data_in.qvel[adr_qvel_y])  # 记录速度（轮子接触点）
+    phi_log.append(x[2])  # 记录 roll
+    w_log.append(x[3])  # 记录 roll 角速度
+    u_log.append(0.5 * u)  # 记录控制量
+    y_ref_log.append(y_ref)  # 记录y参考
+    ydot_ref_log.append(ydot_ref)  # 记录y速度参考
+    e_y_log.append(e[0])  # 记录y误差
+    e_ydot_log.append(e[1])  # 记录y_dot误差
+    e_phi_log.append(e[2])  # 记录phi误差
+    e_phidot_log.append(e[3])  # 记录phi_dot误差
+    u_y_log.append(-K_current[0] * e[0])  # u由y误差产生的分量
+    u_ydot_log.append(-K_current[1] * e[1])  # u由y_dot误差产生的分量
+    u_phi_log.append(-K_current[2] * e[2])  # u由phi误差产生的分量
+    u_phidot_log.append(-K_current[3] * e[3])  # u由phi_dot误差产生的分量
+
+
 def init_controller():  # 初始化控制器
     global K, x0, x0_joint, qpos0, qvel0, Q, R  # 使用全局变量
     while data.time < settle_time:  # 初始稳定
@@ -256,7 +419,7 @@ def init_controller():  # 初始化控制器
     R = np.diag([15])  # 适中的R
     # K, S, E = control.dlqr(Ad, Bd, Q, R)  # 离散 LQR
     # 改用 scipy 的底层求解器:
-    P = la.solve_discrete_are(Ad, Bd, Q, R) 
+    P = scipy.linalg.solve_discrete_are(Ad, Bd, Q, R) 
     # 根据 DARE 结果手动计算 K 矩阵: 
     K = np.linalg.inv(R + Bd.T @ P @ Bd) @ (Bd.T @ P @ Ad)  # 计算 LQR 增益
     print("x0 =", x0)  # 输出平衡点
@@ -281,6 +444,8 @@ def controller(model_in, data_in):  # 控制回调
     e = x - x_ref  # 跟踪误差
     u = -K @ e  # LQR 控制
     u = np.clip(u, -16.0, 16.0)  # 力矩限幅
+    # print("K =", K)
+    # print("e =", e)
     data_in.ctrl[aid_left] = 0.5 * u[0]  # 左轮力矩
     data_in.ctrl[aid_right] = 0.5 * u[0]  # 右轮力矩
     t_log.append(data_in.time)  # 记录时间
@@ -376,10 +541,10 @@ def main():  # 主函数
     glfw.set_cursor_pos_callback(window, mouse_move)  # 鼠标移动回调
     glfw.set_mouse_button_callback(window, mouse_button)  # 鼠标按键回调
     glfw.set_scroll_callback(window, scroll)  # 滚轮回调
-    init_controller()  # 初始化控制器
+    init_LPV_controller()  # 初始化控制器
     data.qpos[adr_qpos_roll] = data.qpos[adr_qpos_roll] + phi_init  # 初始侧倾
     mj.mj_forward(model, data)  # 前向更新
-    mj.set_mjcb_control(controller)  # 设置控制回调
+    mj.set_mjcb_control(LPV_controller)  # 设置控制回调
 
     real_time_start = glfw.get_time()
     sim_time_start = data.time
