@@ -16,20 +16,34 @@ w_step = 0.2  # 角速度增量
 v_max = 2.0  # 速度上限
 w_max = 2.0  # 角速度上限
 
-kp_steer = 40.0  # 舵角 PID 的比例
-kd_steer = 2.0  # 舵角 PID 的微分
-ki_steer = 0.5  # 舵角 PID 的积分
-kp_wheel = 10.0  # 轮速 PID 的比例
-kd_wheel = 0.5  # 轮速 PID 的微分
-ki_wheel = 0.5  # 轮速 PID 的积分
 
-tau_steer_max = 50.0  # 舵角力矩限幅
-tau_wheel_max = 50.0  # 轮子力矩限幅
+class PIDController:
+    """PID控制器类"""
+    def __init__(self, kp, ki, kd, int_min, int_max, out_min, out_max):
+        self.kp = kp  # 比例增益
+        self.ki = ki  # 积分增益
+        self.kd = kd  # 微分增益
+        self.int_min = int_min  # 积分下限
+        self.int_max = int_max  # 积分上限
+        self.out_min = out_min  # 输出下限
+        self.out_max = out_max  # 输出上限
+        self.integral = 0.0  # 积分项
+    
+    def compute(self, error, derivative, dt):
+        """计算PID输出"""
+        self.integral = clamp(self.integral + error * dt, self.int_min, self.int_max)
+        output = self.kp * error + self.ki * self.integral - self.kd * derivative
+        return clamp(output, self.out_min, self.out_max)
+    
+    def reset(self):
+        """重置积分项"""
+        self.integral = 0.0
 
-int_steer_l = 0.0  # 左舵角积分
-int_steer_r = 0.0  # 右舵角积分
-int_wheel_l = 0.0  # 左轮积分
-int_wheel_r = 0.0  # 右轮积分
+
+pid_steer_l = PIDController(kp=40.0, ki=0.5, kd=2.0, int_min=-1.0, int_max=1.0, out_min=-50.0, out_max=50.0)
+pid_steer_r = PIDController(kp=40.0, ki=0.5, kd=2.0, int_min=-1.0, int_max=1.0, out_min=-50.0, out_max=50.0)
+pid_wheel_l = PIDController(kp=10.0, ki=0.5, kd=0.5, int_min=-2.0, int_max=2.0, out_min=-50.0, out_max=50.0)
+pid_wheel_r = PIDController(kp=10.0, ki=0.5, kd=0.5, int_min=-2.0, int_max=2.0, out_min=-50.0, out_max=50.0)
 
 model = None  # MuJoCo 模型句柄
 data = None  # MuJoCo 数据句柄
@@ -49,11 +63,11 @@ qvel_right_steer = -1  # 右舵角 qvel 索引
 qvel_left_wheel = -1  # 左轮 qvel 索引
 qvel_right_wheel = -1  # 右轮 qvel 索引
 
-wheel_radius = 0.05  # 轮子半径
-x_front = 0.13  # 前轮模块 x 坐标
-y_front = 0.0  # 前轮模块 y 坐标
-x_rear = -0.13  # 后轮模块 x 坐标
-y_rear = 0.0  # 后轮模块 y 坐标
+wheel_radius = 0.09  # 轮子半径
+x_left = 0.13  # 前轮模块 x 坐标
+y_left = 0.0  # 前轮模块 y 坐标
+x_right = -0.13  # 后轮模块 x 坐标
+y_right = 0.0  # 后轮模块 y 坐标
 
 chassis_bid = -1  # 车身 body id
 
@@ -70,13 +84,26 @@ def wrap_to_pi(a):  # 角度归一化到 [-pi, pi]
     return a  # 返回归一化角度
 
 
-def steer_solve(vx, vy, wz, x_i, y_i):  # 舵轮解算
-    vix = vx - wz * y_i  # 模块处 x 速度
+def steer_solve(vx, vy, wz, x_i, y_i, current_steer=0.0):  
+    """解算舵角和轮速，考虑最优舵角选择"""
     viy = vy + wz * x_i  # 模块处 y 速度
-    steer = math.atan2(viy, vix)  # 舵角
+    vix = vx - wz * y_i  # 模块处 x 速度
     speed = math.hypot(vix, viy)  # 线速度
-    wheel_omega = speed / max(1e-6, wheel_radius)  # 轮速
-    return steer, wheel_omega  # 返回舵角与轮速
+    
+    if speed < 1e-6:  # 速度为零时，目标舵角归零
+        return 0.0, 0.0  # 舵角归零，轮速为零
+    
+    target_steer = -math.atan2(vix, viy)  # 目标舵角
+    
+    # 优化1：选择最小舵角转动
+    # 比较直接转动和反向转动的角度
+    err_direct = wrap_to_pi(target_steer - current_steer)  # 直接转动误差
+    err_reverse = wrap_to_pi(target_steer + math.pi - current_steer)  # 反向转动误差（轮速反向）
+    
+    if abs(err_reverse) < abs(err_direct):  # 反向转动更优
+        return wrap_to_pi(target_steer + math.pi), -speed / wheel_radius
+    else:  # 直接转动更优
+        return target_steer, speed / wheel_radius
 
 
 def keyboard(window, key, scancode, act, mods):  # 键盘回调
@@ -84,17 +111,17 @@ def keyboard(window, key, scancode, act, mods):  # 键盘回调
     if act not in (glfw.PRESS, glfw.REPEAT):  # 只处理按下/长按
         return  # 直接返回
     if key == glfw.KEY_UP:  # 前进
-        vx_cmd += v_step  # 增加 x 速度
+        vy_cmd += v_step  # 增加 x 速度
     elif key == glfw.KEY_DOWN:  # 后退
-        vx_cmd -= v_step  # 减少 x 速度
-    elif key == glfw.KEY_RIGHT:  # 向右平移
         vy_cmd -= v_step  # 减少 y 速度
+    elif key == glfw.KEY_RIGHT:  # 向右平移
+        vx_cmd += v_step  # 增加 x 速度
     elif key == glfw.KEY_LEFT:  # 向左平移
-        vy_cmd += v_step  # 增加 y 速度
+        vx_cmd -= v_step  # 减少 x 速度
     elif key == glfw.KEY_Q:  # 逆时针旋转
-        wz_cmd += w_step  # 增加 yaw 速度
+        wz_cmd += w_step  # 减少 yaw 速度
     elif key == glfw.KEY_E:  # 顺时针旋转
-        wz_cmd -= w_step  # 减少 yaw 速度
+        wz_cmd -= w_step  # 增加 yaw 速度
     elif key == glfw.KEY_SPACE:  # 清零
         vx_cmd = 0.0  # 清零 x
         vy_cmd = 0.0  # 清零 y
@@ -108,7 +135,7 @@ def init_ids():  # 初始化索引与几何
     global aid_left_steer, aid_right_steer, aid_left_wheel, aid_right_wheel  # 执行器 id
     global qpos_left_steer, qvel_left_steer, qpos_right_steer, qvel_right_steer  # 舵角索引
     global qvel_left_wheel, qvel_right_wheel  # 轮子索引
-    global wheel_radius, x_front, y_front, x_rear, y_rear, chassis_bid  # 几何与坐标
+    global wheel_radius, x_left, y_left, x_right, y_right, chassis_bid  # 几何与坐标
     aid_left_steer = model.actuator("left_steer_tau").id  # 左舵角执行器
     aid_right_steer = model.actuator("right_steer_tau").id  # 右舵角执行器
     aid_left_wheel = model.actuator("left_wheel_tau").id  # 左轮执行器
@@ -124,38 +151,59 @@ def init_ids():  # 初始化索引与几何
     qvel_left_wheel = model.jnt_dofadr[jid_lw]  # 左轮 qvel
     qvel_right_wheel = model.jnt_dofadr[jid_rw]  # 右轮 qvel
     wheel_radius = model.geom("left_wheel_geom").size[0]  # 轮子半径
-    x_front, y_front, _ = model.body("left_module").pos  # 前轮模块坐标
-    x_rear, y_rear, _ = model.body("right_module").pos  # 后轮模块坐标
+    x_left, y_left, _ = model.body("left_module").pos  # 前轮模块坐标
+    x_right, y_right, _ = model.body("right_module").pos  # 后轮模块坐标
     chassis_bid = model.body("chassis").id  # 车身 body id
 
 
 def controller(model_in, data_in):  # 控制回调
-    global int_steer_l, int_steer_r, int_wheel_l, int_wheel_r  # 积分项
     dt = model_in.opt.timestep  # 时间步长
-    steer_f, omega_f = steer_solve(vx_cmd, vy_cmd, wz_cmd, x_front, y_front)  # 前轮目标
-    steer_r, omega_r = steer_solve(vx_cmd, vy_cmd, wz_cmd, x_rear, y_rear)  # 后轮目标
-    theta_l = data_in.qpos[qpos_left_steer]  # 左舵角
-    theta_r = data_in.qpos[qpos_right_steer]  # 右舵角
+    
+    theta_l = data_in.qpos[qpos_left_steer]  # 左舵角当前值
+    theta_r = data_in.qpos[qpos_right_steer]  # 右舵角当前值
+    
+    steer_l, omega_l = steer_solve(vx_cmd, vy_cmd, wz_cmd, x_left, y_left, theta_l)  # 前轮目标
+    steer_r, omega_r = steer_solve(vx_cmd, vy_cmd, wz_cmd, x_right, y_right, theta_r)  # 后轮目标
+    
+    # 当速度为零时，重置PID积分项，避免积分累积导致舵角缓慢漂移
+    speed_total = math.hypot(vx_cmd, vy_cmd) + abs(wz_cmd) * 0.5  # 综合速度指标
+    if speed_total < 1e-6:
+        pid_steer_l.reset()
+        pid_steer_r.reset()
+        pid_wheel_l.reset()
+        pid_wheel_r.reset()
+    
+    # 优化2：调整舵角旋转方向以抵消转动惯量
+    err_l = wrap_to_pi(steer_l - theta_l)  # 左舵角误差
+    err_r = wrap_to_pi(steer_r - theta_r)  # 右舵角误差
+    
+    # 如果两个舵角同向旋转且角度较大，尝试让其中一个反向
+    if err_l * err_r > 0 and abs(err_l) > 0.5 and abs(err_r) > 0.5:  # 同向旋转且角度较大
+        # 尝试让其中一个舵反向（轮速也反向）
+        err_l_alt = wrap_to_pi(steer_l + math.pi - theta_l)  # 左舵反向选项
+        err_r_alt = wrap_to_pi(steer_r + math.pi - theta_r)  # 右舵反向选项
+        
+        # 选择总转动角度最小的方案
+        if abs(err_l_alt) + abs(err_r) < abs(err_l) + abs(err_r_alt):
+            if abs(err_l_alt) < abs(err_l) + 0.5:  # 只有在增加不大时才采用
+                steer_l = wrap_to_pi(steer_l + math.pi)
+                omega_l = -omega_l
+                err_l = err_l_alt
+        else:
+            if abs(err_r_alt) < abs(err_r) + 0.5:
+                steer_r = wrap_to_pi(steer_r + math.pi)
+                omega_r = -omega_r
+                err_r = err_r_alt
+    
     dtheta_l = data_in.qvel[qvel_left_steer]  # 左舵角角速度
     dtheta_r = data_in.qvel[qvel_right_steer]  # 右舵角角速度
     w_l = data_in.qvel[qvel_left_wheel]  # 左轮角速度
     w_r = data_in.qvel[qvel_right_wheel]  # 右轮角速度
-    err_ls = wrap_to_pi(steer_f - theta_l)  # 左舵角误差
-    err_rs = wrap_to_pi(steer_r - theta_r)  # 右舵角误差
-    int_steer_l = clamp(int_steer_l + err_ls * dt, -1.0, 1.0)  # 左舵角积分
-    int_steer_r = clamp(int_steer_r + err_rs * dt, -1.0, 1.0)  # 右舵角积分
-    tau_ls = kp_steer * err_ls - kd_steer * dtheta_l + ki_steer * int_steer_l  # 左舵角力矩
-    tau_rs = kp_steer * err_rs - kd_steer * dtheta_r + ki_steer * int_steer_r  # 右舵角力矩
-    err_wl = omega_f - w_l  # 左轮速度误差
-    err_wr = omega_r - w_r  # 右轮速度误差
-    int_wheel_l = clamp(int_wheel_l + err_wl * dt, -2.0, 2.0)  # 左轮积分
-    int_wheel_r = clamp(int_wheel_r + err_wr * dt, -2.0, 2.0)  # 右轮积分
-    tau_wl = kp_wheel * err_wl - kd_wheel * w_l + ki_wheel * int_wheel_l  # 左轮力矩
-    tau_wr = kp_wheel * err_wr - kd_wheel * w_r + ki_wheel * int_wheel_r  # 右轮力矩
-    data_in.ctrl[aid_left_steer] = float(clamp(tau_ls, -tau_steer_max, tau_steer_max))  # 左舵角输出
-    data_in.ctrl[aid_right_steer] = float(clamp(tau_rs, -tau_steer_max, tau_steer_max))  # 右舵角输出
-    data_in.ctrl[aid_left_wheel] = float(clamp(tau_wl, -tau_wheel_max, tau_wheel_max))  # 左轮输出
-    data_in.ctrl[aid_right_wheel] = float(clamp(tau_wr, -tau_wheel_max, tau_wheel_max))  # 右轮输出
+    
+    data_in.ctrl[aid_left_steer] = pid_steer_l.compute(err_l, dtheta_l, dt)  # 左舵角输出
+    data_in.ctrl[aid_right_steer] = pid_steer_r.compute(err_r, dtheta_r, dt)  # 右舵角输出
+    data_in.ctrl[aid_left_wheel] = pid_wheel_l.compute(omega_l - w_l, w_l, dt)  # 左轮输出
+    data_in.ctrl[aid_right_wheel] = pid_wheel_r.compute(omega_r - w_r, w_r, dt)  # 右轮输出
 
 
 def main():  # 主函数

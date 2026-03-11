@@ -9,6 +9,8 @@
   </default>
 
   <asset>
+    <texture name="tex_checker" type="2d" builtin="checker" width="512" height="512" rgb1="0.9 0.9 0.9" rgb2="0.6 0.6 0.6" />
+    <material name="mat_ground" texture="tex_checker" texrepeat="4 4" texuniform="true" />
     <material name="mat_chassis" rgba="0.2 0.2 0.2 1" />
     <material name="mat_leg" rgba="0.2 0.5 0.9 1" />
     <material name="mat_wheel" rgba="0.05 0.05 0.05 1" />
@@ -17,7 +19,7 @@
 
   <worldbody>
     <!-- 地面与相机 -->
-    <geom name="ground" type="plane" size="-1 -1 0.1" rgba="0.92 0.92 0.92 1" friction="1.2 0.005 0.0001" />
+    <geom name="ground" type="plane" size="10 10 0.1" rgba="0.92 0.92 0.92 1" friction="1.2 0.005 0.0001" material="mat_ground" />
     <light name="sun" pos="0 0 2" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" />
     <camera name="track" mode="trackcom" pos="0 -1.2 0.6" xyaxes="1 0 0 0 0 1" />
 
@@ -72,7 +74,7 @@
     <motor name="left_steer_tau" joint="left_steer" gear="1" ctrlrange="-50 50" />
     <motor name="right_steer_tau" joint="right_steer" gear="1" ctrlrange="-50 50" />
     <!-- 轮子力矩控制（PID 在脚本中实现） -->
-    <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-200 200" />
-    <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-200 200" />
+    <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-8 8" />
+    <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-8 8" />
   </actuator>
 </mujoco>
