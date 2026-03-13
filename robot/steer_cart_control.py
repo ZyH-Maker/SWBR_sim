@@ -13,8 +13,8 @@ wz_cmd = 0.0  # 期望 yaw 角速度
 
 v_step = 0.1  # 速度增量
 w_step = 0.2  # 角速度增量
-v_max = 2.0  # 速度上限
-w_max = 2.0  # 角速度上限
+v_max = 3.0  # 速度上限
+w_max = 12.0  # 角速度上限
 
 
 class PIDController:

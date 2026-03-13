@@ -11,11 +11,16 @@
   <option timestep="0.001" gravity="0 0 -9.81" integrator="RK4" cone="elliptic" />
 
   <default>
-    <joint damping="0.001" armature="0.0" />
+    <!-- <joint damping="0.001" armature="0.0" /> -->
+    <joint damping="1.0" armature="0.0" />
     <geom friction="0.9 0.01 0.0001" solref="0.02 1" solimp="0.9 0.95 0.002" />
+    <!-- <joint damping="0.02" armature="0.002" />
+    <geom friction="1.2 0.003 0.0001" solref="0.005 1" solimp="0.95 0.99 0.0005" /> -->
   </default>
 
   <asset>
+    <texture name="tex_checker" type="2d" builtin="checker" width="512" height="512" rgb1="0.9 0.9 0.9" rgb2="0.6 0.6 0.6" />
+    <material name="mat_ground" texture="tex_checker" texrepeat="4 4" texuniform="true" />
     <material name="mat_chassis" rgba="0.2 0.2 0.2 1" />
     <material name="mat_leg" rgba="0.2 0.5 0.9 1" />
     <material name="mat_wheel" rgba="0.05 0.05 0.05 1" />
@@ -24,7 +29,8 @@
 
   <worldbody>
     <!-- 地面与相机 -->
-    <geom name="ground" type="plane" size="-1 -1 0.1" rgba="0.92 0.92 0.92 1" />
+    <geom name="ground" type="plane" size="30 30 0.1" rgba="0.92 0.92 0.92 1"  material="mat_ground" />
+    <geom type="plane" size="10 10 0.1" solref="0.04 0.9" solimp="0.9 0.99 0.003" material="mat_ground"/>
     <light name="sun" pos="0 0 2" dir="0 0 -1" diffuse="0.8 0.8 0.8" specular="0.2 0.2 0.2" />
     <camera name="track" mode="trackcom" pos="0 -1.2 0.6" xyaxes="1 0 0 0 0 1" />
 
@@ -37,9 +43,10 @@
       <joint name="base_x" type="slide" axis="1 0 0" damping="0" armature="0" />
       <joint name="base_y" type="slide" axis="0 1 0" damping="0" armature="0" />
       <joint name="base_z" type="slide" axis="0 0 1" damping="0" armature="0" />
-      <joint name="base_roll" type="hinge" axis="1 0 0" damping="0" armature="0" />
-      <joint name="base_1" type="hinge" axis="0 1 0" damping="0" armature="0" />
-      <joint name="base_2" type="hinge" axis="0 0 1" damping="0" armature="0" />
+      <!-- <joint name="base_roll" type="hinge" axis="1 0 0" damping="0" armature="0" limited="true" range="-0.01 0.01"/> -->
+      <joint name="base_yaw" type="hinge" axis="0 0 1" damping="0" armature="0" />
+      <joint name="base_roll" type="hinge" axis="1 0 0" damping="0" armature="0"/>
+      <joint name="base_pitch" type="hinge" axis="0 1 0" damping="0" armature="0" />
       <!-- <freejoint name="chassis_free" /> -->
 
       <!-- 机身主体（相对 roll_base 上移到原来的高度） -->
@@ -73,13 +80,16 @@
 
           <body name="left_wheel" pos="0 0 -0.24">
             <joint name="left_wheel_spin" type="hinge" axis="0 1 0" damping="0.1" armature="0.00"/>
-            <geom
+            <!-- <geom
               name="left_wheel_geom"
               type="cylinder"
               size="0.06 0.01"
               quat="0.7071068 0.7071068 0 0"
               mass="0.828"
-              material="mat_wheel" />
+              material="mat_wheel" /> -->
+            <geom name="left_wheel_geom" type="sphere" size="0.06" friction="0.8 0.01 0.001"/>
+            <!-- <geom name="left_wheel_visual" type="cylinder" size="0.06 0.01" contype="0" conaffinity="0" rgba="0.2 0.2 0.2 1" quat="0.7071068 0.7071068 0 0"
+              mass="0.828"/> -->
           </body>
         </body>
 
@@ -103,13 +113,16 @@
 
           <body name="right_wheel" pos="0 0 -0.24">
             <joint name="right_wheel_spin" type="hinge" axis="0 1 0" damping="0.1" armature="0.00"/>
-            <geom
+            <!-- <geom
               name="right_wheel_geom"
               type="cylinder"
               size="0.06 0.01"
               quat="0.7071068 0.7071068 0 0"
               mass="0.828"
-              material="mat_wheel" />
+              material="mat_wheel" /> -->
+            <geom name="right_wheel_geom" type="sphere" size="0.06" friction="0.8 0.01 0.001"/>
+            <!-- <geom name="right_wheel_visual" type="cylinder" size="0.06 0.01" contype="0" conaffinity="0" rgba="0.2 0.2 0.2 1" quat="0.7071068 0.7071068 0 0"
+              mass="0.828"/> -->
           </body>
         </body>
       </body>
@@ -122,7 +135,9 @@
     <motor name="left_wheel_tau" joint="left_wheel_spin" gear="1" ctrlrange="-8 8" />
     <motor name="right_wheel_tau" joint="right_wheel_spin" gear="1" ctrlrange="-8 8" />
     <!-- 舵角位置控制（swerve 用） -->
-    <position name="left_steer_pos" joint="left_steer" kp="30" ctrlrange="-3.1416 3.1416" />
-    <position name="right_steer_pos" joint="right_steer" kp="30" ctrlrange="-3.1416 3.1416" />
+    <!-- <position name="left_steer_tau" joint="left_steer" kp="0" ctrlrange="-3.14 3.14" />
+    <position name="right_steer_tau" joint="right_steer" kp="0" ctrlrange="-3.14 3.14" /> -->
+    <motor name="left_steer_tau" joint="left_steer" gear="1" ctrlrange="-15 15" />
+    <motor name="right_steer_tau" joint="right_steer" gear="1" ctrlrange="-15 15" />
   </actuator>
 </mujoco>
